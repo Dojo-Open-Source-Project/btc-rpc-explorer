@@ -1,3 +1,8 @@
+##### v3.3.0+SW
+###### 2023-03-09
+
+* Removed "node-details" and "peers" pages due to underired data leak
+
 ##### v3.3.0
 ###### 2021-12-07
 
