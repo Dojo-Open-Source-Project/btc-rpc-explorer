@@ -58,7 +58,7 @@ router.get("/", asyncHandler(async (req, res, next) => {
 		res.locals.perfId = perfId;
 
 		res.locals.homepage = true;
-		
+
 		// don't need timestamp on homepage "blocks-list", this flag disables
 		res.locals.hideTimestampColumn = true;
 
@@ -122,7 +122,7 @@ router.get("/", asyncHandler(async (req, res, next) => {
 		res.locals.getblockchaininfo = getblockchaininfo;
 
 		res.locals.difficultyPeriod = parseInt(Math.floor(getblockchaininfo.blocks / coinConfig.difficultyAdjustmentBlockCount));
-			
+
 
 		var blockHeights = [];
 		if (getblockchaininfo.blocks) {
@@ -157,19 +157,19 @@ router.get("/", asyncHandler(async (req, res, next) => {
 
 		promises.push(utils.timePromise("homepage.getBlocksByHeight", async () => {
 			const latestBlocks = await coreApi.getBlocksByHeight(blockHeights);
-			
+
 			res.locals.latestBlocks = latestBlocks;
 			res.locals.blocksUntilDifficultyAdjustment = ((res.locals.difficultyPeriod + 1) * coinConfig.difficultyAdjustmentBlockCount) - latestBlocks[0].height;
 		}));
 
-		
+
 		var targetBlocksPerDay = 24 * 60 * 60 / global.coinConfig.targetBlockTimeSeconds;
 		res.locals.targetBlocksPerDay = targetBlocksPerDay;
 
 		if (false && getblockchaininfo.chain !== 'regtest') {
 			/*promises.push(new Promise(async (resolve, reject) => {
 				res.locals.txStats = await utils.timePromise("homepage.getTxStats", coreApi.getTxStats(targetBlocksPerDay / 4, -targetBlocksPerDay, "latest"));
-				
+
 				resolve();
 			}));*/
 
@@ -206,13 +206,13 @@ router.get("/", asyncHandler(async (req, res, next) => {
 			res.locals.nextBlockMaxFeeTxid = nextBlockEstimate.maxFeeTxid;
 
 			res.locals.nextBlockTotalFees = nextBlockEstimate.totalFees;
-		
+
 		}, perfResults));*/
 
 
 		await utils.awaitPromises(promises);
-		
-		
+
+
 		var firstBlockHeader = res.locals.difficultyPeriodFirstBlockHeader;
 		var currentBlock = res.locals.latestBlocks[0];
 		var heightDiff = currentBlock.height - firstBlockHeader.height;
@@ -284,59 +284,11 @@ router.get("/", asyncHandler(async (req, res, next) => {
 
 	} catch (err) {
 		utils.logError("238023hw87gddd", err);
-					
+
 		res.locals.userMessage = "Error building page: " + err;
 
 		await utils.timePromise("homepage.render", async () => {
 			res.render("index");
-		});
-
-		next();
-	}
-}));
-
-router.get("/node-details", asyncHandler(async (req, res, next) => {
-	try {
-		const { perfId, perfResults } = utils.perfLogNewItem({action:"node-details"});
-		res.locals.perfId = perfId;
-
-		const promises = [];
-
-		promises.push(utils.timePromise("node-details.getBlockchainInfo", async () => {
-			res.locals.getblockchaininfo = await coreApi.getBlockchainInfo();
-		}, perfResults));
-
-		promises.push(utils.timePromise("node-details.getNetworkInfo", async () => {
-			res.locals.getnetworkinfo = await coreApi.getNetworkInfo();
-		}, perfResults));
-
-		promises.push(utils.timePromise("node-details.getUptimeSeconds", async () => {
-			res.locals.uptimeSeconds = await coreApi.getUptimeSeconds();
-		}, perfResults));
-
-		promises.push(utils.timePromise("node-details.getNetTotals", async () => {
-			res.locals.getnettotals = await coreApi.getNetTotals();
-		}, perfResults));
-
-
-		await utils.awaitPromises(promises);
-
-
-		res.locals.perfResults = perfResults;
-
-		await utils.timePromise("node-details.render", async () => {
-			res.render("node-details");
-		}, perfResults);
-		
-		next();
-
-	} catch (err) {
-		utils.logError("32978efegdde", err);
-					
-		res.locals.userMessage = "Error building page: " + err;
-
-		await utils.timePromise("node-details.render", async () => {
-			res.render("node-details");
 		});
 
 		next();
@@ -355,65 +307,10 @@ router.get("/mempool-summary", asyncHandler(async (req, res, next) => {
 
 	} catch (err) {
 		utils.logError("390824yw7e332", err);
-					
+
 		res.locals.userMessage = "Error building page: " + err;
 
 		res.render("mempool-summary");
-
-		next();
-	}
-}));
-
-router.get("/peers", asyncHandler(async (req, res, next) => {
-	try {
-		const { perfId, perfResults } = utils.perfLogNewItem({action:"peers"});
-		res.locals.perfId = perfId;
-
-		const promises = [];
-
-		promises.push(utils.timePromise("peers.getPeerSummary", async () => {
-			res.locals.peerSummary = await coreApi.getPeerSummary();
-		}, perfResults));
-
-		
-		await utils.awaitPromises(promises);
-
-		var peerSummary = res.locals.peerSummary;
-
-		var peerIps = [];
-		for (var i = 0; i < peerSummary.getpeerinfo.length; i++) {
-			var ipWithPort = peerSummary.getpeerinfo[i].addr;
-			if (ipWithPort.lastIndexOf(":") >= 0) {
-				var ip = ipWithPort.substring(0, ipWithPort.lastIndexOf(":"));
-				if (ip.trim().length > 0) {
-					peerIps.push(ip.trim());
-				}
-			}
-		}
-
-		if (peerIps.length > 0) {
-			res.locals.peerIpSummary = await utils.timePromise("peers.geoLocateIpAddresses", async () => {
-				return await utils.geoLocateIpAddresses(peerIps)
-			}, perfResults);
-			
-			res.locals.mapBoxComApiAccessKey = config.credentials.mapBoxComApiAccessKey;
-		}
-
-
-		await utils.timePromise("peers.render", async () => {
-			res.render("peers");
-		}, perfResults);
-
-		next();
-
-	} catch (err) {
-		utils.logError("394rhweghe", err);
-					
-		res.locals.userMessage = "Error: " + err;
-
-		await utils.timePromise("peers.render", async () => {
-			res.render("peers");
-		});
 
 		next();
 	}
@@ -600,7 +497,7 @@ router.get("/blocks", asyncHandler(async (req, res, next) => {
 			res.locals.blocks = await coreApi.getBlocksByHeight(blockHeights);
 		}, perfResults));
 
-		
+
 		promises.push(utils.timePromise("blocks.getBlocksByHeight", async () => {
 			try {
 				var rawblockstats = await coreApi.getBlocksStatsByHeight(blockHeights);
@@ -675,7 +572,7 @@ router.get("/xyzpub/:extendedPubkey", asyncHandler(async (req, res, next) => {
 		const extendedPubkey = req.params.extendedPubkey;
 		res.locals.extendedPubkey = extendedPubkey;
 
-		
+
 		let limit = 20;
 		if (req.query.limit) {
 			limit = parseInt(req.query.limit);
@@ -688,7 +585,7 @@ router.get("/xyzpub/:extendedPubkey", asyncHandler(async (req, res, next) => {
 		}
 		res.locals.offset = offset;
 
-		
+
 		res.locals.paginationBaseUrl = `./xyzpub/${extendedPubkey}`;
 
 		res.locals.metaTitle = `Extended Public Key: ${utils.ellipsizeMiddle(extendedPubkey, 24)}`;
@@ -714,7 +611,7 @@ router.get("/xyzpub/:extendedPubkey", asyncHandler(async (req, res, next) => {
 			res.locals.pubkeyTypeDesc = "Pay to Public Key Hash";
 			res.locals.bip32Path = "m/44'/0'";
 
-			
+
 			let xpub = extendedPubkey;
 			if (!extendedPubkey.startsWith(xpub_tpub)) {
 				xpub = utils.xpubChangeVersionBytes(extendedPubkey, xpub_tpub);
@@ -881,10 +778,16 @@ router.get("/block-stats", asyncHandler(async (req, res, next) => {
 }));
 
 router.get("/mining-template", asyncHandler(async (req, res, next) => {
+	// url changed
+	res.redirect("./next-block");
+}));
+
+router.get("/next-block", asyncHandler(async (req, res, next) => {
 	const blockTemplate = await coreApi.getBlockTemplate();
 
 	res.locals.minFeeRate = 1000000;
 	res.locals.maxFeeRate = -1;
+	res.locals.medianFeeRate = -1;
 
 	const parentTxIndexes = new Set();
 	blockTemplate.transactions.forEach(tx => {
@@ -895,7 +798,8 @@ router.get("/mining-template", asyncHandler(async (req, res, next) => {
 		}
 	});
 
-	var txIndex = 1;
+	let txIndex = 1;
+	let feeRates = [];
 	blockTemplate.transactions.forEach(tx => {
 		let feeRate = tx.fee / tx.weight * 4;
 
@@ -916,6 +820,8 @@ router.get("/mining-template", asyncHandler(async (req, res, next) => {
 		// their effective fee rate (which takes descendant fee rates
 		// into account)
 		if (!parentTxIndexes.has(txIndex) && (!tx.depends || tx.depends.length == 0)) {
+			feeRates.push(feeRate);
+
 			if (feeRate > res.locals.maxFeeRate) {
 				res.locals.maxFeeRate = feeRate;
 			}
@@ -928,11 +834,15 @@ router.get("/mining-template", asyncHandler(async (req, res, next) => {
 		txIndex++;
 	});
 
+	if (feeRates.length > 0) {
+		res.locals.medianFeeRate = feeRates[Math.floor(feeRates.length / 2)];
+	}
+
 	res.locals.blockTemplate = blockTemplate;
 
-	
-	await utils.timePromise("mining-template.render", async () => {
-		res.render("mining-template");
+
+	await utils.timePromise("next-block.render", async () => {
+		res.render("next-block");
 	});
 
 	next();
@@ -957,22 +867,22 @@ router.post("/search", function(req, res, next) {
 	var rawCaseQuery = req.body.query.trim();
 
 	req.session.query = req.body.query;
-	
+
 	// xpub/ypub/zpub -> redirect: /xyzpub/XXX
 	if (rawCaseQuery.match(/^(xpub|ypub|zpub|Ypub|Zpub).*$/)) {
 		res.redirect(`./xyzpub/${rawCaseQuery}`);
-		
+
 		return;
 	}
 
 	// tpub/upub/vpub -> redirect: /xyzpub/XXX
 	if (rawCaseQuery.match(/^(tpub|upub|vpub|Upub|Vpub).*$/)) {
 		res.redirect(`./xyzpub/${rawCaseQuery}`);
-		
+
 		return;
 	}
-	
-	
+
+
 	// Support txid@height lookups
 	if (/^[a-f0-9]{64}@\d+$/.test(query)) {
 		return res.redirect("./tx/" + query);
@@ -992,7 +902,7 @@ router.post("/search", function(req, res, next) {
 				if (!global.txindexAvailable) {
 					req.session.userMessage += noTxIndexMsg;
 				}
-				
+
 				res.redirect("./");
 			});
 		});
@@ -1000,7 +910,7 @@ router.post("/search", function(req, res, next) {
 	} else if (!isNaN(query)) {
 		coreApi.getBlockByHeight(parseInt(query)).then(function(blockByHeight) {
 			res.redirect("./block-height/" + query);
-			
+
 		}).catch(function(err) {
 			req.session.userMessage = "No results found for query: " + query;
 
@@ -1076,7 +986,7 @@ router.get("/block-height/:blockHeight", asyncHandler(async (req, res, next) => 
 		promises.push(utils.timePromise("block-height.getBlockStats", async () => {
 			try {
 				const blockStats = await coreApi.getBlockStats(result.hash);
-				
+
 				res.locals.result.blockstats = blockStats;
 
 			} catch (err) {
@@ -1109,7 +1019,7 @@ router.get("/block-height/:blockHeight", asyncHandler(async (req, res, next) => 
 			res.locals.metaTitle = `Bitcoin Block #${blockHeight.toLocaleString()}`;
 			res.locals.metaDesc = "";
 		}
-		
+
 
 		await utils.timePromise("block-height.render", async () => {
 			res.render("block");
@@ -1178,7 +1088,7 @@ router.get("/block/:blockHash", asyncHandler(async (req, res, next) => {
 		promises.push(utils.timePromise("block.getBlockStats", async () => {
 			try {
 				const blockStats = await coreApi.getBlockStats(blockHash);
-				
+
 				res.locals.result.blockstats = blockStats;
 
 			} catch (err) {
@@ -1212,7 +1122,7 @@ router.get("/block/:blockHash", asyncHandler(async (req, res, next) => {
 			res.locals.metaDesc = "";
 		}
 
-		
+
 		await utils.timePromise("block.render", async () => {
 			res.render("block");
 		}, perfResults);
@@ -1242,7 +1152,7 @@ router.get("/predicted-blocks", asyncHandler(async (req, res, next) => {
 
 	} catch (err) {
 		utils.logError("2083ryw0efghsu", err);
-					
+
 		res.locals.userMessage = "Error building page: " + err;
 
 		res.render("predicted-blocks");
@@ -1258,7 +1168,7 @@ router.get("/predicted-blocks-old", asyncHandler(async (req, res, next) => {
 
 		const blockTemplate = {weight: 0, totalFees: new Decimal(0), vB: 0, txCount:0, txids: []};
 		const blocks = [];
-		
+
 		mempoolTxSummaries.sort((a, b) => {
 			let aFeeRate = (a.f + a.af) / (a.w + a.asz * 4);
 			let bFeeRate = (b.f + b.af) / (b.w + b.asz * 4);
@@ -1402,7 +1312,7 @@ router.get("/tx/:transactionId", asyncHandler(async (req, res, next) => {
 
 		let txInputLimit = (res.locals.crawlerBot) ? 3 : -1;
 
-		var txPromise = req.query.blockHeight ? 
+		var txPromise = req.query.blockHeight ?
 				async () => {
 					const block = await coreApi.getBlockByHeight(parseInt(req.query.blockHeight));
 					res.locals.block = block;
@@ -1434,7 +1344,7 @@ router.get("/tx/:transactionId", asyncHandler(async (req, res, next) => {
 				res.locals.mempoolDetails = await coreApi.getMempoolTxDetails(txid, true);
 
 			}, perfResults));
-			
+
 		} else {
 			promises.push(utils.timePromise("tx.getblockheader", async () => {
 				res.locals.result.getblock = await global.rpcClient.command('getblockheader', tx.blockhash);
@@ -1460,7 +1370,7 @@ router.get("/tx/:transactionId", asyncHandler(async (req, res, next) => {
 		}
 
 		res.locals.perfResults = perfResults;
-		
+
 		await utils.timePromise("tx.render", async () => {
 			res.render("transaction");
 		}, perfResults);
@@ -1482,7 +1392,7 @@ router.get("/tx/:transactionId", asyncHandler(async (req, res, next) => {
 			res.locals.userMessageMarkdown = `Failed to load transaction: txid=**${txid}**`;
 		}
 
-		
+
 
 		utils.logError("1237y4ewssgt", err);
 
@@ -1505,7 +1415,7 @@ router.get("/address/:address", asyncHandler(async (req, res, next) => {
 
 		res.locals.maxTxOutputDisplayCount = config.site.addressPage.txOutputMaxDefaultDisplay;
 
-		
+
 		if (req.query.limit) {
 			limit = parseInt(req.query.limit);
 
@@ -1537,7 +1447,7 @@ router.get("/address/:address", asyncHandler(async (req, res, next) => {
 		res.locals.paginationBaseUrl = `./address/${address}?sort=${sort}`;
 		res.locals.transactions = [];
 		res.locals.addressApiSupport = addressApi.getCurrentAddressApiFeatureSupport();
-		
+
 		res.locals.result = {};
 
 		var addressEncoding = "unknown";
@@ -1546,7 +1456,8 @@ router.get("/address/:address", asyncHandler(async (req, res, next) => {
 		var bech32Error = null;
 		var bech32mError = null;
 
-		if (address.match(/^[132m].*$/)) {
+		let b58prefix = (global.activeBlockchain == "main" ? /^[13].*$/ : /^[2mn].*$/);
+		if (address.match(b58prefix)) {
 			try {
 				res.locals.addressObj = bitcoinjs.address.fromBase58Check(address);
 				res.locals.addressObj.hash = res.locals.addressObj.hash.toString("hex");
@@ -1581,7 +1492,7 @@ router.get("/address/:address", asyncHandler(async (req, res, next) => {
 				bech32mError = err;
 			}
 		}
-		
+
 
 		if (res.locals.addressObj == null || addressEncoding == "unknown") {
 			if (base58Error) {
@@ -1657,11 +1568,11 @@ router.get("/address/:address", asyncHandler(async (req, res, next) => {
 							: coreApi.getRawTransactionsByHeights(txids, blockHeightsByTxid)
 								.then(transactions => ({ transactions, txInputsByTransaction: {} }))
 						);
-						
+
 						res.locals.transactions = rawTxResult.transactions;
 						res.locals.txInputsByTransaction = rawTxResult.txInputsByTransaction;
 
-						
+
 						// for coinbase txs, we need the block height in order to calculate subsidy to display
 						var coinbaseTxs = [];
 						for (var i = 0; i < rawTxResult.transactions.length; i++) {
@@ -1711,7 +1622,7 @@ router.get("/address/:address", asyncHandler(async (req, res, next) => {
 						for (var i = 0; i < rawTxResult.transactions.length; i++) {
 							var tx = rawTxResult.transactions[i];
 							var txInputs = rawTxResult.txInputsByTransaction[tx.txid] || {};
-							
+
 							if (handledTxids.includes(tx.txid)) {
 								continue;
 							}
@@ -1772,7 +1683,7 @@ router.get("/address/:address", asyncHandler(async (req, res, next) => {
 		}, perfResults));
 
 		await utils.awaitPromises(promises);
-		
+
 		await utils.timePromise("address.render", async () => {
 			res.render("address");
 		}, perfResults);
@@ -1795,7 +1706,7 @@ router.get("/address/:address", asyncHandler(async (req, res, next) => {
 router.get("/rpc-terminal", function(req, res, next) {
 	if (!config.demoSite && !req.authenticated) {
 		res.send("RPC Terminal / Browser require authentication. Set an authentication password via the 'BTCEXP_BASIC_AUTH_PASSWORD' environment variable (see .env-sample file for more info).");
-		
+
 		next();
 
 		return;
@@ -1841,7 +1752,7 @@ router.post("/rpc-terminal", asyncHandler(async (req, res, next) => {
 
 	try {
 		const result = await global.rpcClientNoTimeout.command([{method:cmd, parameters:parsedParams}]);//, function(err, result, resHeaders) {
-		
+
 		if (result) {
 			debugLog("Result[1]: " + JSON.stringify(result, null, 4));
 
@@ -1889,7 +1800,7 @@ router.get("/rpc-browser", asyncHandler(async (req, res, next) => {
 
 			if (!req.session.recentRpcCommands.includes(method)) {
 				req.session.recentRpcCommands.unshift(method);
-				
+
 				while (req.session.recentRpcCommands.length > 5) {
 					req.session.recentRpcCommands.pop();
 				}
@@ -1902,7 +1813,7 @@ router.get("/rpc-browser", asyncHandler(async (req, res, next) => {
 
 			if (req.query.execute) {
 				var argDetails = methodHelp.args;
-				
+
 				if (req.query.args) {
 					debugLog("ARGS: " + JSON.stringify(req.query.args));
 
@@ -1939,14 +1850,14 @@ router.get("/rpc-browser", asyncHandler(async (req, res, next) => {
 								if (req.query.args[i]) {
 									argValues.push(JSON.parse(req.query.args[i]));
 								}
-								
+
 								break;
 
 							} else if (argProperties[j] === "json object") {
 								if (req.query.args[i]) {
 									argValues.push(JSON.parse(req.query.args[i]));
 								}
-								
+
 								break;
 
 							} else {
@@ -1968,7 +1879,7 @@ router.get("/rpc-browser", asyncHandler(async (req, res, next) => {
 					return;
 				}
 
-				//var csurfPromise = 
+				//var csurfPromise =
 
 				await new Promise((resolve, reject) => {
 					forceCsrf(req, res, async (err) => {
@@ -2018,13 +1929,13 @@ router.get("/rpc-browser", asyncHandler(async (req, res, next) => {
 						return next(err);
 					}
 
-					
+
 				});*/
 			}
 		}
 	} catch (err) {
 		res.locals.pageErrors.push(utils.logError("23ewyf0weee", err, {method:method, params:argValues}));
-		
+
 		res.locals.userMessage = "Error loading help content: " + err;
 	}
 
@@ -2095,7 +2006,7 @@ router.get("/mempool-transactions", asyncHandler(async (req, res, next) => {
 		const txids = mempoolData.txids;
 		res.locals.txCount = mempoolData.txCount;
 
-		
+
 		const promises = [];
 
 		promises.push(utils.timePromise("mempool-tx.getRawTransactionsWithInputs", async () => {
@@ -2127,7 +2038,7 @@ router.get("/mempool-transactions", asyncHandler(async (req, res, next) => {
 
 	} catch (err) {
 		utils.logError("3297gfsdyde3q", err);
-					
+
 		res.locals.userMessage = "Error building page: " + err;
 
 		await utils.timePromise("mempool-transactions.render", async () => {
@@ -2157,7 +2068,7 @@ router.get("/tx-stats", asyncHandler(async (req, res, next) => {
 
 	promises.push(utils.timePromise("tx-stats.getTxStats-day", async () => {
 		const statsDay = await coreApi.getTxStats(144, height - 144, height);
-		
+
 		res.locals.txStatsDay = statsDay;
 	}, perfResults));
 
@@ -2256,7 +2167,7 @@ router.get("/fun", function(req, res, next) {
 	});
 
 	res.locals.historicalData = sortedList;
-	
+
 	res.render("fun");
 
 	next();
@@ -2270,9 +2181,25 @@ router.get("/quotes", function(req, res, next) {
 	next();
 });
 
+router.get("/holidays", function(req, res, next) {
+	res.locals.btcHolidays = global.btcHolidays;
+
+	res.render("holidays");
+
+	next();
+});
+
 router.get("/quote/:quoteIndex", function(req, res, next) {
 	res.locals.quoteIndex = parseInt(req.params.quoteIndex);
 	res.locals.btcQuotes = btcQuotes.items;
+
+	if (btcQuotes.items[res.locals.quoteIndex].duplicateIndex) {
+		let duplicateIndex = btcQuotes.items[res.locals.quoteIndex].duplicateIndex;
+
+		res.redirect(`${config.baseUrl}quote/${duplicateIndex}`);
+
+		return;
+	}
 
 	res.render("quote");
 
