@@ -1,4 +1,6 @@
-# BTC RPC Explorer
+# BTC RPC Explorer SW
+
+## This is a fork of [BTC-RPC Explorer](https://github.com/janoside/btc-rpc-explorer/) with small tweaks fixing undesirable information leaks.
 
 ## Self-Hosted Bitcoin explorer for everyone running [Bitcoin Core](https://github.com/bitcoin/bitcoin).
 
