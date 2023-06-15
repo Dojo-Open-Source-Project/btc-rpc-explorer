@@ -1,7 +1,39 @@
+##### v3.4.0
+###### 2023-06-14
+
+* Breaking changes to the API (see [./api/changelog](/api/changlog))
+* Homepage
+	* New "Next Halving" widget in Network Summary
+	* Show difficulty ATH comparison
+	* Show "Next Block" fullness
+	* Progress bar for difficulty adjustment estimate
+	* Include median fee rate for next-block estimates (also on [/next-block](./next-block))
+	* Show a banner if 'today' is a Bitcoin 'Holiday' (see more below)
+* Minor fixes for running against Bitcoin Core v23
+* Block Analysis: include top "days destroyed" transactions
+* URL change: /mining-template -> /next-block (redirect is included for compatibility)
+* On Extended PubKey pages, include balance data for various address (if Electrum server is configured)
+* New [/next-halving](./next-halving) tool
+* Several new API actions/changes; see [/api/changelog](./api/changelog)
+* New [/holidays](./holidays), a curated list of Bitcoin 'Holidays'
+* Support for different view options on [/fun](./fun)
+* On [/difficulty-history](./difficulty-history), make delta graph honor timespan filtering
+* Proper use of production-ready MemoryStore for session data
+* Support for serving static assets via a configurable CDN
+* Misc fixes for erroneous data display on non-mainnet nodes
+* Switch from fontawesome to bootstrap-icons v1.8.0
+* Refreshed miner-identification database
+* Refreshed "Dark" theme with blues toned down (legacy dark theme still available)
+* UI/UX tweaks
+* Misc minor fixes
+* Updated dependencies
+
+
 ##### v3.3.0+SW
 ###### 2023-03-09
 
 * Removed "node-details" and "peers" pages due to underired data leak
+
 
 ##### v3.3.0
 ###### 2021-12-07

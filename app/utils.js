@@ -11,8 +11,18 @@ const Decimal = require("decimal.js");
 const axios = require("axios");
 const qrcode = require("qrcode");
 const bs58check = require("bs58check");
-const bip32 = require('bip32');
+const ecc = require('tiny-secp256k1');
+const { BIP32Factory } = require('bip32');
+const moment = require("moment");
+const { bech32, bech32m } = require("bech32");
+
+// You must wrap a tiny-secp256k1 compatible implementation
+const bip32 = BIP32Factory(ecc);
+
 const bitcoinjs = require('bitcoinjs-lib');
+
+
+
 
 const config = require("./config.js");
 const coins = require("./coins.js");
@@ -50,7 +60,8 @@ const crawlerBotUserAgentStrings = {
 	"aol": new RegExp("aolbuild", "i"),
 	"moz": new RegExp("dotbot", "i"),
 	"semrush": new RegExp("SemrushBot", "i"),
-	"majestic": new RegExp("MJ12bot", "i")
+	"majestic": new RegExp("MJ12bot", "i"),
+	"python-requests": new RegExp("python-requests", "i")
 };
 
 const ipMemoryCache = {};
@@ -94,7 +105,7 @@ setInterval(() => {
 			fs.writeFileSync(ipCacheFile, JSON.stringify(ipMemoryCache, null, 4));
 
 		} catch (e) {
-			utils.logError("24308tew7hgde", e);
+			logError("24308tew7hgde", e);
 		}
 
 		ipMemoryCacheNewItems = false;
@@ -157,10 +168,10 @@ function formatHex(hex, outputFormat="utf8") {
 }
 
 function splitArrayIntoChunks(array, chunkSize) {
-	var j = array.length;
-	var chunks = [];
+	let j = array.length;
+	let chunks = [];
 	
-	for (var i = 0; i < j; i += chunkSize) {
+	for (let i = 0; i < j; i += chunkSize) {
 		chunks.push(array.slice(i, i + chunkSize));
 	}
 
@@ -168,14 +179,14 @@ function splitArrayIntoChunks(array, chunkSize) {
 }
 
 function splitArrayIntoChunksByChunkCount(array, chunkCount) {
-	var bigChunkSize = Math.ceil(array.length / chunkCount);
-	var bigChunkCount = chunkCount - (chunkCount * bigChunkSize - array.length);
+	let bigChunkSize = Math.ceil(array.length / chunkCount);
+	let bigChunkCount = chunkCount - (chunkCount * bigChunkSize - array.length);
 
-	var chunks = [];
+	let chunks = [];
 
-	var chunkStart = 0;
-	for (var chunk = 0; chunk < chunkCount; chunk++) {
-		var chunkSize = (chunk < bigChunkCount ? bigChunkSize : (bigChunkSize - 1));
+	let chunkStart = 0;
+	for (let chunk = 0; chunk < chunkCount; chunk++) {
+		let chunkSize = (chunk < bigChunkCount ? bigChunkSize : (bigChunkSize - 1));
 
 		chunks.push(array.slice(chunkStart, chunkStart + chunkSize));
 
@@ -186,7 +197,7 @@ function splitArrayIntoChunksByChunkCount(array, chunkCount) {
 }
 
 function getRandomString(length, chars) {
-	var mask = '';
+	let mask = '';
 	
 	if (chars.indexOf('a') > -1) {
 		mask += 'abcdefghijklmnopqrstuvwxyz';
@@ -204,8 +215,8 @@ function getRandomString(length, chars) {
 		mask += '~`!@#$%^&*()_+-={}[]:";\'<>?,./|\\';
 	}
 	
-	var result = '';
-	for (var i = length; i > 0; --i) {
+	let result = '';
+	for (let i = length; i > 0; --i) {
 		result += mask[Math.floor(Math.random() * mask.length)];
 	}
 	
@@ -215,15 +226,15 @@ function getRandomString(length, chars) {
 function formatCurrencyAmountWithForcedDecimalPlaces(amount, formatType, forcedDecimalPlaces) {
 	formatType = formatType.toLowerCase();
 
-	var currencyType = global.currencyTypes[formatType];
+	let currencyType = global.currencyTypes[formatType];
 
 	if (currencyType == null) {
 		throw `Unknown currency type: ${formatType}`;
 	}
 
-	var dec = new Decimal(amount);
+	let dec = new Decimal(amount);
 
-	var decimalPlaces = currencyType.decimalPlaces;
+	let decimalPlaces = currencyType.decimalPlaces;
 	//if (decimalPlaces == 0 && dec < 1) {
 	//	decimalPlaces = 5;
 	//}
@@ -237,21 +248,37 @@ function formatCurrencyAmountWithForcedDecimalPlaces(amount, formatType, forcedD
 
 		if (forcedDecimalPlaces >= 0) {
 			// toFixed will keep trailing zeroes
-			var baseStr = addThousandsSeparators(dec.toFixed(decimalPlaces));
+			let baseStr = addThousandsSeparators(dec.toFixed(decimalPlaces));
 
 			return {val:baseStr, currencyUnit:currencyType.name, simpleVal:baseStr, intVal:parseInt(dec)};
 
 		} else {
 			// toDP excludes trailing zeroes but doesn't "fix" numbers like 1e-8
-			// instead, we use toFixed and manually strip trailing zeroes
+			// instead, we use toFixed and (optionally) manually strip trailing zeroes
 			// old method is kept for reference since this is sensitive, high-volume code
-			var baseStr = addThousandsSeparators(dec.toFixed(decimalPlaces).replace(/0+$/, "").replace(/\.$/, ""));
-			//var baseStr = addThousandsSeparators(dec.toDP(decimalPlaces)); // old version, failed to properly format "1e-8" (left unchanged)
+			let baseStr = addThousandsSeparators(dec.toFixed(decimalPlaces).replace(/\.$/, ""));
 
-			var returnVal = {currencyUnit:currencyType.name, simpleVal:baseStr, intVal:parseInt(dec)};
+			// with Issue #500, the idea was raised that stripping trailing zeroes can
+			// make values more difficult to parse visually; now the stripping is
+			// dynamic, based on the value - if any of the 4 least-significant digits
+			// are non-zero (i.e. sat-value is NOT evenly divisible by 10,000), then
+			// no stripping is performed, otherwise it is performed, to preserve some
+			// of the UX benefit of larger, "even" amounts (e.g. 0.1BTC).
+			let trailingZeroesStrippedStr = baseStr.replace(/0+$/, "");
+			if (baseStr.length - trailingZeroesStrippedStr.length >= 4) {
+				baseStr = trailingZeroesStrippedStr
+
+				if (baseStr.endsWith(".")) {
+					baseStr = baseStr.slice(0, -1);
+				}
+			}
+
+			//let baseStr = addThousandsSeparators(dec.toDP(decimalPlaces)); // old version, failed to properly format "1e-8" (left unchanged)
+
+			let returnVal = {currencyUnit:currencyType.name, simpleVal:baseStr, intVal:parseInt(dec)};
 
 			// max digits in "val"
-			var maxValDigits = config.site.valueDisplayMaxLargeDigits;
+			let maxValDigits = config.site.valueDisplayMaxLargeDigits;
 
 			// todo: make this section locale-aware (don't hardcode ".")
 
@@ -275,7 +302,7 @@ function formatCurrencyAmountWithForcedDecimalPlaces(amount, formatType, forcedD
 		if (global.exchangeRates != null && global.exchangeRates[currencyType.id] != null) {
 			dec = dec.times(global.exchangeRates[currencyType.id]);
 
-			var baseStr = addThousandsSeparators(dec.toDecimalPlaces(decimalPlaces));
+			let baseStr = addThousandsSeparators(dec.toDecimalPlaces(decimalPlaces));
 
 			return {val:baseStr, currencyUnit:currencyType.name, simpleVal:baseStr, intVal:parseInt(dec)};
 
@@ -297,7 +324,7 @@ function formatCurrencyAmountInSmallestUnits(amount, forcedDecimalPlaces) {
 
 // ref: https://stackoverflow.com/a/2901298/673828
 function addThousandsSeparators(x) {
-	var parts = x.toString().split(".");
+	let parts = x.toString().split(".");
 	parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 
 	return parts.join(".");
@@ -305,28 +332,28 @@ function addThousandsSeparators(x) {
 
 function satoshisPerUnitOfLocalCurrency(localCurrency) {
 	if (global.exchangeRates != null) {
-		var exchangeType = localCurrency;
+		let exchangeType = localCurrency;
 
 		if (!global.exchangeRates[localCurrency]) {
 			// if current display currency is a native unit, default to USD for exchange values
 			exchangeType = "usd";
 		}
 
-		var dec = new Decimal(1);
-		var one = new Decimal(1);
+		let dec = new Decimal(1);
+		let one = new Decimal(1);
 		dec = dec.times(global.exchangeRates[exchangeType]);
 		
 		// USD/BTC -> BTC/USD
 		dec = one.dividedBy(dec);
 
-		var unitName = coins[config.coin].baseCurrencyUnit.name;
-		var satCurrencyType = global.currencyTypes["sat"];
-		var localCurrencyType = global.currencyTypes[localCurrency];
+		let unitName = coins[config.coin].baseCurrencyUnit.name;
+		let satCurrencyType = global.currencyTypes["sat"];
+		let localCurrencyType = global.currencyTypes[localCurrency];
 
 		// BTC/USD -> sat/USD
 		dec = dec.times(satCurrencyType.multiplier);
 
-		var exchangedAmt = parseInt(dec);
+		let exchangedAmt = parseInt(dec);
 
 		return {amt:addThousandsSeparators(exchangedAmt),amtRaw:exchangedAmt, unit:`sat/${localCurrencyType.symbol}`}
 	}
@@ -336,9 +363,9 @@ function satoshisPerUnitOfLocalCurrency(localCurrency) {
 
 function getExchangedCurrencyFormatData(amount, exchangeType, includeUnit=true) {
 	if (global.exchangeRates != null && global.exchangeRates[exchangeType.toLowerCase()] != null) {
-		var dec = new Decimal(amount);
+		let dec = new Decimal(amount);
 		dec = dec.times(global.exchangeRates[exchangeType.toLowerCase()]);
-		var exchangedAmt = parseFloat(Math.round(dec * 100) / 100).toFixed(2);
+		let exchangedAmt = parseFloat(Math.round(dec * 100) / 100).toFixed(2);
 
 		return {
 			symbol: global.currencySymbols[exchangeType],
@@ -348,9 +375,9 @@ function getExchangedCurrencyFormatData(amount, exchangeType, includeUnit=true) 
 		
 	} else if (exchangeType == "au") {
 		if (global.exchangeRates != null && global.goldExchangeRates != null) {
-			var dec = new Decimal(amount);
+			let dec = new Decimal(amount);
 			dec = dec.times(global.exchangeRates.usd).dividedBy(global.goldExchangeRates.usd);
-			var exchangedAmt = parseFloat(Math.round(dec * 100) / 100).toFixed(2);
+			let exchangedAmt = parseFloat(Math.round(dec * 100) / 100).toFixed(2);
 
 			return {
 				symbol: "AU",
@@ -363,11 +390,11 @@ function getExchangedCurrencyFormatData(amount, exchangeType, includeUnit=true) 
 	return "";
 }
 
-function formatExchangedCurrency(amount, exchangeType) {
+function formatExchangedCurrency(amount, exchangeType, decimals=2) {
 	if (global.exchangeRates != null && global.exchangeRates[exchangeType.toLowerCase()] != null) {
-		var dec = new Decimal(amount);
+		let dec = new Decimal(amount);
 		dec = dec.times(global.exchangeRates[exchangeType.toLowerCase()]);
-		var exchangedAmt = parseFloat(Math.round(dec * 100) / 100).toFixed(2);
+		let exchangedAmt = parseFloat(Math.round(dec * 100) / 100).toFixed(decimals);
 
 		return {
 			val: addThousandsSeparators(exchangedAmt),
@@ -377,9 +404,9 @@ function formatExchangedCurrency(amount, exchangeType) {
 		};
 	} else if (exchangeType == "au") {
 		if (global.exchangeRates != null && global.goldExchangeRates != null) {
-			var dec = new Decimal(amount);
+			let dec = new Decimal(amount);
 			dec = dec.times(global.exchangeRates.usd).dividedBy(global.goldExchangeRates.usd);
-			var exchangedAmt = parseFloat(Math.round(dec * 100) / 100).toFixed(2);
+			let exchangedAmt = parseFloat(Math.round(dec * 100) / 100).toFixed(decimals);
 
 			return {
 				val: addThousandsSeparators(exchangedAmt),
@@ -394,12 +421,12 @@ function formatExchangedCurrency(amount, exchangeType) {
 }
 
 function seededRandom(seed) {
-	var x = Math.sin(seed++) * 10000;
+	let x = Math.sin(seed++) * 10000;
 	return x - Math.floor(x);
 }
 
 function seededRandomIntBetween(seed, min, max) {
-	var rand = seededRandom(seed);
+	let rand = seededRandom(seed);
 	return (min + (max - min) * rand);
 }
 
@@ -440,33 +467,78 @@ function ellipsizeMiddle(str, length, replacement="…", extraCharAtStart=true) 
 	}
 }
 
-function shortenTimeDiff(str) {
-	str = str.replace(" years", "y");
-	str = str.replace(" year", "y");
 
-	str = str.replace(" months", "mo");
-	str = str.replace(" month", "mo");
 
-	str = str.replace(" weeks", "w");
-	str = str.replace(" week", "w");
+// options:
+//  - oneElement (default: false)
+//  - stripZeroes (default: true)
+//  - shortenDurationNames (default: true)
+//  - outputCommas (default: true)
+function summarizeDuration(duration, options={}) {
+	let oneElement = "oneElement" in options ? options.oneElement : false;
+	let stripZeroes = "stripZeroes" in options ? options.stripZeroes : true;
+	let shortenDurationNames = "shortenDurationNames" in options ? options.shortenDurationNames : true;
+	let outputCommas = "outputCommas" in options ? options.outputCommas : true;
 
-	str = str.replace(" days", "d");
-	str = str.replace(" day", "d");
+	//console.log(JSON.stringify(options) + " - " + oneElement + " - " + stripZeroes + " - " + shortenDurationNames + " - " + outputCommas);
 
-	str = str.replace(" hours", "hr");
-	str = str.replace(" hour", "hr");
+	let formatParts = duration.format().split(",").map(x => x.trim());
+	let str = formatParts.join(", ");
 
-	str = str.replace(" minutes", "min");
-	str = str.replace(" minute", "min");
+	if (oneElement) {
+		let parts = [duration.asYears(), duration.asMonths(), duration.asWeeks(), duration.asDays(), duration.asHours(), duration.asMinutes(), duration.asSeconds()];
+		let partNames = ["years", "months", "weeks", "days", "hours", "minutes", "seconds"];
+
+		for (let i = 0; i < parts.length; i++) {
+			if (parts[i] > 1) {
+				str = `${new Decimal(parts[i]).toDP(1)} ${partNames[i]}`;
+
+				break;
+			}
+		}
+	} else if (stripZeroes) {
+		// strip duration elements with zero magnitude (e.g. 11 months 0 days 12 hours)
+		formatParts = formatParts.map(x => { return x.startsWith("0 ") ? "" : x; }).filter(x => x.length > 0);
+
+		// hack: moment.js seems to have a bug where there can be formatted items that include "-0" magnitude elements
+		formatParts = formatParts.map(x => { return x.startsWith("-0 ") ? "" : x; }).filter(x => x.length > 0);
+
+		str = formatParts.join(", ");
+	}
+	
+
+	if (shortenDurationNames) {
+		str = str.replace(" years", "y");
+		str = str.replace(" year", "y");
+
+		str = str.replace(" months", "mo");
+		str = str.replace(" month", "mo");
+
+		str = str.replace(" weeks", "w");
+		str = str.replace(" week", "w");
+
+		str = str.replace(" days", "d");
+		str = str.replace(" day", "d");
+
+		str = str.replace(" hours", "hr");
+		str = str.replace(" hour", "hr");
+
+		str = str.replace(" minutes", "min");
+		str = str.replace(" minute", "min");
+	}
+
+	if (!outputCommas) {
+		str = str.split(", ").join(" ");
+	}
 
 	return str;
 }
 
 function logMemoryUsage() {
-	var mbUsed = process.memoryUsage().heapUsed / 1024 / 1024;
+	let mbUsed = process.memoryUsage().heapUsed / 1024 / 1024;
 	mbUsed = Math.round(mbUsed * 100) / 100;
 
-	var mbTotal = process.memoryUsage().heapTotal / 1024 / 1024;
+	let mbTotal = process.memoryUsage().heapTotal / 1024 / 1024;
 	mbTotal = Math.round(mbTotal * 100) / 100;
 
 	//debugLog("memoryUsage: heapUsed=" + mbUsed + ", heapTotal=" + mbTotal + ", ratio=" + parseInt(mbUsed / mbTotal * 100));
@@ -478,14 +550,14 @@ function identifyMiner(coinbaseTx, blockHeight) {
 	}
 	
 	if (global.miningPoolsConfigs) {
-		for (var i = 0; i < global.miningPoolsConfigs.length; i++) {
-			var miningPoolsConfig = global.miningPoolsConfigs[i];
+		for (let i = 0; i < global.miningPoolsConfigs.length; i++) {
+			let miningPoolsConfig = global.miningPoolsConfigs[i];
 
-			for (var payoutAddress in miningPoolsConfig.payout_addresses) {
+			for (let payoutAddress in miningPoolsConfig.payout_addresses) {
 				if (miningPoolsConfig.payout_addresses.hasOwnProperty(payoutAddress)) {
 					if (coinbaseTx.vout && coinbaseTx.vout.length > 0) {
 						if (getVoutAddresses(coinbaseTx.vout[0]).includes(payoutAddress)) {
-							var minerInfo = miningPoolsConfig.payout_addresses[payoutAddress];
+							let minerInfo = miningPoolsConfig.payout_addresses[payoutAddress];
 							minerInfo.identifiedBy = "payout address " + payoutAddress;
 
 							return minerInfo;
@@ -494,10 +566,10 @@ function identifyMiner(coinbaseTx, blockHeight) {
 				}
 			}
 
-			for (var coinbaseTag in miningPoolsConfig.coinbase_tags) {
+			for (let coinbaseTag in miningPoolsConfig.coinbase_tags) {
 				if (miningPoolsConfig.coinbase_tags.hasOwnProperty(coinbaseTag)) {
 					if (formatHex(coinbaseTx.vin[0].coinbase, "utf8").indexOf(coinbaseTag) != -1) {
-						var minerInfo = miningPoolsConfig.coinbase_tags[coinbaseTag];
+						let minerInfo = miningPoolsConfig.coinbase_tags[coinbaseTag];
 						minerInfo.identifiedBy = "coinbase tag '" + coinbaseTag + "'";
 
 						return minerInfo;
@@ -505,18 +577,18 @@ function identifyMiner(coinbaseTx, blockHeight) {
 				}
 			}
 
-			for (var blockHash in miningPoolsConfig.block_hashes) {
+			for (let blockHash in miningPoolsConfig.block_hashes) {
 				if (blockHash == coinbaseTx.blockhash) {
-					var minerInfo = miningPoolsConfig.block_hashes[blockHash];
+					let minerInfo = miningPoolsConfig.block_hashes[blockHash];
 					minerInfo.identifiedBy = "known block hash '" + blockHash + "'";
 
 					return minerInfo;
 				}
 			}
 
-			if (miningPoolsConfig.block_heights) {
-				for (var minerName in miningPoolsConfig.block_heights) {
-					var minerInfo = miningPoolsConfig.block_heights[minerName];
+			if (global.activeBlockchain == "main" && miningPoolsConfig.block_heights) {
+				for (let minerName in miningPoolsConfig.block_heights) {
+					let minerInfo = miningPoolsConfig.block_heights[minerName];
 					minerInfo.name = minerName;
 
 					if (minerInfo.heights.includes(blockHeight)) {
@@ -530,7 +602,7 @@ function identifyMiner(coinbaseTx, blockHeight) {
 	}
 
 	if (coinbaseTx.vout && coinbaseTx.vout.length > 0) {
-		for (var i = 0; i < coinbaseTx.vout.length; i++) {
+		for (let i = 0; i < coinbaseTx.vout.length; i++) {
 			const vout = coinbaseTx.vout[i];
 
 			const voutValue = new Decimal(vout.value);
@@ -552,21 +624,21 @@ function identifyMiner(coinbaseTx, blockHeight) {
 }
 
 function getTxTotalInputOutputValues(tx, txInputs, blockHeight) {
-	var totalInputValue = new Decimal(0);
-	var totalOutputValue = new Decimal(0);
+	let totalInputValue = new Decimal(0);
+	let totalOutputValue = new Decimal(0);
 
 	try {
 		if (txInputs) {
-			for (var i = 0; i < tx.vin.length; i++) {
+			for (let i = 0; i < tx.vin.length; i++) {
 				if (tx.vin[i].coinbase) {
 					totalInputValue = totalInputValue.plus(new Decimal(coinConfig.blockRewardFunction(blockHeight, global.activeBlockchain)));
 
 				} else {
-					var txInput = txInputs[i];
+					let txInput = txInputs[i];
 
 					if (txInput) {
 						try {
-							var vout = txInput;
+							let vout = txInput;
 
 							if (vout.value) {
 								totalInputValue = totalInputValue.plus(new Decimal(vout.value));
@@ -581,9 +653,9 @@ function getTxTotalInputOutputValues(tx, txInputs, blockHeight) {
 			totalInputValue = null
 		}
 
-		for (var i = 0; i < tx.vout.length; i++) {
-				totalOutputValue = totalOutputValue.plus(new Decimal(tx.vout[i].value));
-			}
+		for (let i = 0; i < tx.vout.length; i++) {
+			totalOutputValue = totalOutputValue.plus(new Decimal(tx.vout[i].value));
+		}
 	} catch (err) {
 		logError("2308sh0sg44", err, {tx:tx, txInputs:txInputs, blockHeight:blockHeight});
 	}
@@ -596,11 +668,11 @@ function getBlockTotalFeesFromCoinbaseTxAndBlockHeight(coinbaseTx, blockHeight) 
 		return 0;
 	}
 
-	var blockReward = coinConfig.blockRewardFunction(blockHeight, global.activeBlockchain);
+	let blockReward = coinConfig.blockRewardFunction(blockHeight, global.activeBlockchain);
 
-	var totalOutput = new Decimal(0);
-	for (var i = 0; i < coinbaseTx.vout.length; i++) {
-		var outputValue = coinbaseTx.vout[i].value;
+	let totalOutput = new Decimal(0);
+	for (let i = 0; i < coinbaseTx.vout.length; i++) {
+		let outputValue = coinbaseTx.vout[i].value;
 		if (outputValue > 0) {
 			totalOutput = totalOutput.plus(new Decimal(outputValue));
 		}
@@ -660,7 +732,7 @@ async function refreshExchangeRates() {
 		try {
 			const response = await axios.get(coins[config.coin].exchangeRateData.jsonUrl);
 
-			var exchangeRates = coins[config.coin].exchangeRateData.responseBodySelectorFunction(response.data);
+			let exchangeRates = coins[config.coin].exchangeRateData.responseBodySelectorFunction(response.data);
 			if (exchangeRates != null) {
 				global.exchangeRates = exchangeRates;
 				global.exchangeRatesUpdateTime = new Date();
@@ -686,7 +758,7 @@ async function refreshExchangeRates() {
 			try {
 				const response = await axios.get(coins[config.coin].goldExchangeRateData.jsonUrl);
 
-				var exchangeRates = coins[config.coin].goldExchangeRateData.responseBodySelectorFunction(response.data);
+				let exchangeRates = coins[config.coin].goldExchangeRateData.responseBodySelectorFunction(response.data);
 				if (exchangeRates != null) {
 					global.goldExchangeRates = exchangeRates;
 					global.goldExchangeRatesUpdateTime = new Date();
@@ -712,11 +784,11 @@ function geoLocateIpAddresses(ipAddresses, provider) {
 			return;
 		}
 
-		var ipDetails = {ips:ipAddresses, detailsByIp:{}};
+		let ipDetails = {ips:ipAddresses, detailsByIp:{}};
 
-		var promises = [];
-		for (var i = 0; i < ipAddresses.length; i++) {
-			var ipStr = ipAddresses[i];
+		let promises = [];
+		for (let i = 0; i < ipAddresses.length; i++) {
+			let ipStr = ipAddresses[i];
 
 			if (ipStr.endsWith(".onion")) {
 				// tor, no location possible
@@ -736,12 +808,12 @@ function geoLocateIpAddresses(ipAddresses, provider) {
 			promises.push(new Promise(function(resolve2, reject2) {
 				ipCache.get(ipStr).then(async function(result) {
 					if (result.value == null) {
-						var apiUrl = "http://api.ipstack.com/" + result.key + "?access_key=" + config.credentials.ipStackComApiAccessKey;
+						let apiUrl = "http://api.ipstack.com/" + result.key + "?access_key=" + config.credentials.ipStackComApiAccessKey;
 						
 						try {
 							const response = await axios.get(apiUrl);
 
-							var ip = response.data.ip;
+							let ip = response.data.ip;
 
 							ipDetails.detailsByIp[ip] = response.data;
 
@@ -759,7 +831,7 @@ function geoLocateIpAddresses(ipAddresses, provider) {
 						} catch (err) {
 							debugLog("Failed IP-geo-lookup: " + result.key);
 
-							logError("39724gdge33a", error, {ip: result.key});
+							logError("39724gdge33a", err, {ip: result.key});
 
 							// we failed to get what we wanted, but there's no meaningful recourse,
 							// so we log the failure and continue without objection
@@ -787,7 +859,7 @@ function geoLocateIpAddresses(ipAddresses, provider) {
 }
 
 function parseExponentStringDouble(val) {
-	var [lead,decimal,pow] = val.toString().split(/e|\./);
+	let [lead,decimal,pow] = val.toString().split(/e|\./);
 	return +pow <= 0 
 		? "0." + "0".repeat(Math.abs(pow)-1) + lead + decimal
 		: lead + ( +pow >= decimal.length ? (decimal + "0".repeat(+pow-decimal.length)) : (decimal.slice(0,+pow)+"."+decimal.slice(+pow)));
@@ -795,11 +867,11 @@ function parseExponentStringDouble(val) {
 
 function formatLargeNumber(n, decimalPlaces) {
 	try {
-		for (var i = 0; i < exponentScales.length; i++) {
-			var item = exponentScales[i];
+		for (let i = 0; i < exponentScales.length; i++) {
+			let item = exponentScales[i];
 
-			var fraction = new Decimal(n / item.val);
-			if (fraction >= 1) {
+			let fraction = new Decimal(n / item.val);
+			if (Math.abs(fraction) >= 1) {
 				return [fraction.toDP(decimalPlaces), item];
 			}
 		}
@@ -815,11 +887,11 @@ function formatLargeNumber(n, decimalPlaces) {
 
 function formatLargeNumberSignificant(n, significantDigits) {
 	try {
-		for (var i = 0; i < exponentScales.length; i++) {
-			var item = exponentScales[i];
+		for (let i = 0; i < exponentScales.length; i++) {
+			let item = exponentScales[i];
 
-			var fraction = new Decimal(n / item.val);
-			if (fraction >= 1) {
+			let fraction = new Decimal(n / item.val);
+			if (Math.abs(fraction) >= 1) {
 				return [fraction.toDP(Math.max(0, significantDigits - `${Math.floor(fraction)}`.length)), item];
 			}
 		}
@@ -835,13 +907,13 @@ function formatLargeNumberSignificant(n, significantDigits) {
 
 function rgbToHsl(r, g, b) {
 	r /= 255, g /= 255, b /= 255;
-	var max = Math.max(r, g, b), min = Math.min(r, g, b);
-	var h, s, l = (max + min) / 2;
+	let max = Math.max(r, g, b), min = Math.min(r, g, b);
+	let h, s, l = (max + min) / 2;
 
 	if(max == min){
 		h = s = 0; // achromatic
 	}else{
-		var d = max - min;
+		let d = max - min;
 		s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
 		switch(max){
 			case r: h = (g - b) / d + (g < b ? 6 : 0); break;
@@ -856,12 +928,12 @@ function rgbToHsl(r, g, b) {
 
 function colorHexToRgb(hex) {
 	// Expand shorthand form (e.g. "03F") to full form (e.g. "0033FF")
-	var shorthandRegex = /^#?([a-f\d])([a-f\d])([a-f\d])$/i;
+	let shorthandRegex = /^#?([a-f\d])([a-f\d])([a-f\d])$/i;
 	hex = hex.replace(shorthandRegex, function(m, r, g, b) {
 		return r + r + g + g + b + b;
 	});
 
-	var result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+	let result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
 	return result ? {
 		r: parseInt(result[1], 16),
 		g: parseInt(result[2], 16),
@@ -870,7 +942,7 @@ function colorHexToRgb(hex) {
 }
 
 function colorHexToHsl(hex) {
-	var rgb = colorHexToRgb(hex);
+	let rgb = colorHexToRgb(hex);
 	return rgbToHsl(rgb.r, rgb.g, rgb.b);
 }
 
@@ -932,7 +1004,7 @@ function logError(errorId, err, optionalUserData = {}, logStacktrace=true) {
 	}
 
 	
-	var returnVal = {errorId:errorId, error:err};
+	let returnVal = {errorId:errorId, error:err};
 	if (optionalUserData) {
 		returnVal.userData = optionalUserData;
 	}
@@ -942,10 +1014,10 @@ function logError(errorId, err, optionalUserData = {}, logStacktrace=true) {
 
 function buildQrCodeUrls(strings) {
 	return new Promise(function(resolve, reject) {
-		var promises = [];
-		var qrcodeUrls = {};
+		let promises = [];
+		let qrcodeUrls = {};
 
-		for (var i = 0; i < strings.length; i++) {
+		for (let i = 0; i < strings.length; i++) {
 			promises.push(new Promise(function(resolve2, reject2) {
 				buildQrCodeUrl(strings[i], qrcodeUrls).then(function() {
 					resolve2();
@@ -984,8 +1056,9 @@ function buildQrCodeUrl(str, results) {
 }
 
 function outputTypeAbbreviation(outputType) {
-	var map = {
+	const map = {
 		"pubkey": "P2PK",
+		"multisig": "P2MS",
 		"pubkeyhash": "P2PKH",
 		"scripthash": "P2SH",
 		"witness_v0_keyhash": "P2WPKH",
@@ -1004,8 +1077,9 @@ function outputTypeAbbreviation(outputType) {
 }
 
 function outputTypeName(outputType) {
-	var map = {
+	const map = {
 		"pubkey": "Pay to Public Key",
+		"multisig": "Pay to MultiSig",
 		"pubkeyhash": "Pay to Public Key Hash",
 		"scripthash": "Pay to Script Hash",
 		"witness_v0_keyhash": "Witness, v0 Key Hash",
@@ -1102,8 +1176,18 @@ const timeFunction = (uid, f, perfResults=null) => {
 	}
 };
 
-const fileCache = (cacheDir, filename) => {
-	const filepath = `${cacheDir}/${filename}`;
+const fileCache = (cacheDir, cacheName, cacheVersion=1) => {
+	const filename = (version) => { return ((version > 1) ? [cacheName, `v${version}`].join("-") : cacheName) + ".json"; };
+	const filepath = `${cacheDir}/${filename(cacheVersion)}`;
+
+	if (cacheVersion > 1) {
+		// remove old versions
+		for (let i = 1; i < cacheVersion; i++) {
+			if (fs.existsSync(`${cacheDir}/${filename(i)}`)) {
+				fs.unlinkSync(`${cacheDir}/${filename(i)}`);
+			}
+		}
+	}
 
 	return {
 		tryLoadJson: () => {
@@ -1129,7 +1213,7 @@ const fileCache = (cacheDir, filename) => {
 				fs.mkdirSync(cacheDir);
 			}
 
-			fs.writeFileSync(filepath, JSON.stringify(obj));
+			fs.writeFileSync(filepath, JSON.stringify(obj, null, 4));
 		}
 	};
 };
@@ -1166,8 +1250,8 @@ function iterateProperties(obj, action) {
 }
 
 function stringifySimple(object) {
-	var simpleObject = {};
-	for (var prop in object) {
+	let simpleObject = {};
+	for (let prop in object) {
 			if (!object.hasOwnProperty(prop)) {
 					continue;
 			}
@@ -1246,7 +1330,7 @@ function xpubChangeVersionBytes(xpub, targetFormat) {
 	// trim whitespace
 	xpub = xpub.trim();
 
-	var data = bs58check.decode(xpub);
+	let data = bs58check.decode(xpub);
 	data = data.slice(4);
 	data = Buffer.concat([Buffer.from(xpubPrefixes.get(targetFormat), 'hex'), data]);
 
@@ -1284,6 +1368,185 @@ function bip32Addresses(extPubkey, addressType, account, limit=10, offset=0) {
 	return addresses;
 }
 
+function difficultyAdjustmentEstimates(eraStartBlockHeader, currentBlockHeader) {
+	let difficultyPeriod = parseInt(Math.floor(currentBlockHeader.height / coinConfig.difficultyAdjustmentBlockCount));
+	let blocksUntilDifficultyAdjustment = ((difficultyPeriod + 1) * coinConfig.difficultyAdjustmentBlockCount) - currentBlockHeader.height;
+
+	let heightDiff = currentBlockHeader.height - eraStartBlockHeader.height;
+	let blockCount = heightDiff + 1;
+	let timeDiff = currentBlockHeader.mediantime - eraStartBlockHeader.mediantime;
+	let timePerBlock = timeDiff / heightDiff;
+	let timePerBlockDuration = moment.duration(timePerBlock * 1000);
+	let daysUntilAdjustment = new Decimal(blocksUntilDifficultyAdjustment).times(timePerBlock).dividedBy(60 * 60 * 24);
+	let hoursUntilAdjustment = new Decimal(blocksUntilDifficultyAdjustment).times(timePerBlock).dividedBy(60 * 60);
+	let duaDP1 = daysUntilAdjustment.toDP(1);
+	let daysUntilAdjustmentStr = daysUntilAdjustment > 1 ? `~${duaDP1} day${duaDP1 == "1" ? "" : "s"}` : "< 1 day";
+	let hoursUntilAdjustmentStr = hoursUntilAdjustment > 1 ? `~${hoursUntilAdjustment.toDP(0)} hr${hoursUntilAdjustment.toDP(1) == "1" ? "" : "s"}` : "< 1 hr";
+	let nowTime = new Date().getTime() / 1000;
+	let dt = nowTime - eraStartBlockHeader.time;
+	let timePerBlock2 = dt / heightDiff;
+	let predictedBlockCount = dt / coinConfig.targetBlockTimeSeconds;
+
+	let blockRatioPercent = new Decimal(blockCount / predictedBlockCount).times(100);
+	if (blockRatioPercent > 400) {
+		blockRatioPercent = new Decimal(400);
+	}
+	if (blockRatioPercent < 25) {
+		blockRatioPercent = new Decimal(25);
+	}
+
+
+	let diffAdjPercent = blockRatioPercent.minus(new Decimal(100));
+	let diffAdjText = `Blocks during the current difficulty epoch have taken this long, on average, to be mined. If this pace continues, then in ${blocksUntilDifficultyAdjustment.toLocaleString()} block${blocksUntilDifficultyAdjustment == 1 ? "" : "s"} (${daysUntilAdjustmentStr}) the difficulty will adjust upward: +${diffAdjPercent.toDP(1)}%`;
+	let diffAdjSign = "+";
+	let textColorClass = "text-success";
+
+	if (predictedBlockCount > blockCount) {
+		diffAdjPercent = new Decimal(100).minus(blockRatioPercent).times(-1);
+		diffAdjText = `Blocks during the current difficulty epoch have taken this long, on average, to be mined. If this pace continues, then in ${blocksUntilDifficultyAdjustment.toLocaleString()} block${blocksUntilDifficultyAdjustment == 1 ? "" : "s"} (${daysUntilAdjustmentStr}) the difficulty will adjust downward: -${diffAdjPercent.toDP(1)}%`;
+		diffAdjSign = "-";
+		textColorClass = "text-danger";
+	}
+
+	return {
+		estimateAvailable: blockCount > 30 && !isNaN(diffAdjPercent),
+
+		blockCount: blockCount,
+		blocksLeft: blocksUntilDifficultyAdjustment,
+		daysLeftStr: daysUntilAdjustmentStr,
+		timeLeftStr: (daysUntilAdjustment < 1 ? hoursUntilAdjustmentStr : daysUntilAdjustmentStr),
+		calculationBlockCount: heightDiff,
+		currentEpoch: difficultyPeriod,
+
+		delta: diffAdjPercent,
+		sign: diffAdjSign,
+
+		timePerBlock: timePerBlock,
+		firstBlockTime: eraStartBlockHeader.time,
+		nowTime: nowTime,
+		dt: dt,
+		predictedBlockCount: predictedBlockCount,
+
+		//nameDesc: `Estimate for the difficulty adjustment that will occur in ${blocksUntilDifficultyAdjustment.toLocaleString()} block${blocksUntilDifficultyAdjustment == 1 ? "" : "s"} (${daysUntilAdjustmentStr}). This is calculated using the average block time over the last ${heightDiff} block(s). This estimate becomes more reliable as the difficulty epoch nears its end.`,
+	};
+}
+
+function nextHalvingEstimates(eraStartBlockHeader, currentBlockHeader, difficultyAdjustmentDataArg=null) {
+	let blockCount = currentBlockHeader.height;
+	let halvingBlockInterval = coinConfig.halvingBlockIntervalsByNetwork[global.activeBlockchain];
+	let halvingCount = parseInt(blockCount / halvingBlockInterval);
+	let nextHalvingIndex = halvingCount + 1;
+	let targetBlockTimeSeconds = coinConfig.targetBlockTimeSeconds;
+	let nextHalvingBlock = (halvingBlockInterval * nextHalvingIndex);
+	let blocksUntilNextHalving = nextHalvingBlock - blockCount;
+	
+	let terminalHalvingCount = coinConfig.terminalHalvingCountByNetwork[global.activeBlockchain];
+	if (nextHalvingIndex > terminalHalvingCount) {
+		halvingCount = terminalHalvingCount;
+		nextHalvingIndex = -1;
+
+		return {
+			halvingCount: terminalHalvingCount,
+			nextHalvingIndex: -1
+		};
+	}
+
+	let difficultyAdjustmentData = difficultyAdjustmentDataArg;
+	if (!difficultyAdjustmentData) {
+		difficultyAdjustmentData = difficultyAdjustmentEstimates(eraStartBlockHeader, currentBlockHeader);
+	}
+
+	let currDifficultyEraTimeDifferential = (coinConfig.targetBlockTimeSeconds - difficultyAdjustmentData.timePerBlock) * difficultyAdjustmentData.blocksLeft;
+
+
+	let secondsUntilNextHalving = blocksUntilNextHalving * targetBlockTimeSeconds - currDifficultyEraTimeDifferential;
+	let daysUntilNextHalving = secondsUntilNextHalving / 60 / 60 / 24;
+	let nextHalvingDate = new Date(new Date().getTime() + secondsUntilNextHalving * 1000);
+
+	return {
+		blockCount: blockCount,
+		halvingBlockInterval: halvingBlockInterval,
+		halvingCount: halvingCount,
+		nextHalvingIndex: nextHalvingIndex,
+		terminalHalvingCount: terminalHalvingCount,
+		nextHalvingBlock: nextHalvingBlock,
+		blocksUntilNextHalving: blocksUntilNextHalving,
+		targetBlockTimeSeconds: targetBlockTimeSeconds,
+		daysUntilNextHalving: daysUntilNextHalving,
+		nextHalvingDate: nextHalvingDate,
+
+		difficultyAdjustmentData: difficultyAdjustmentData
+	};
+}
+
+function tryParseAddress(address) {
+	let base58Error = null;
+	let bech32Error = null;
+	let bech32mError = null;
+
+	let parsedAddress = null;
+
+	let b58prefix = (global.activeBlockchain == "main" ? /^[13].*$/ : /^[2mn].*$/);
+	if (address.match(b58prefix)) {
+		try {
+			parsedAddress = bitcoinjs.address.fromBase58Check(address);
+			parsedAddress.hash = parsedAddress.hash.toString("hex");
+
+			return {
+				encoding: "base58",
+				parsedAddress: parsedAddress
+			};
+
+		} catch (err) {
+			base58Error = err;
+		}
+	}
+
+	try {
+		parsedAddress = bitcoinjs.address.fromBech32(address);
+		parsedAddress.data = parsedAddress.data.toString("hex");
+
+		return {
+			encoding: "bech32",
+			parsedAddress: parsedAddress
+		};
+
+	} catch (err) {
+		bech32Error = err;
+	}
+
+
+	try {
+		parsedAddress = bech32m.decode(address);
+		parsedAddress.words = Buffer.from(parsedAddress.words).toString("hex");
+
+		return {
+			encoding: "bech32m",
+			parsedAddress: parsedAddress
+		};
+
+	} catch (err) {
+		bech32mError = err;
+	}
+	
+
+	let returnVal = {errors:[]};
+
+	if (base58Error) {
+		returnVal.errors.push(base58Error);
+	}
+
+	if (bech32Error) {
+		returnVal.errors.push(bech32Error);
+	}
+
+	if (bech32mError) {
+		returnVal.errors.push(bech32mError);
+	}
+
+	return returnVal;
+}
+
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -1300,6 +1563,20 @@ const awaitPromises = async (promises) => {
 
 	return promiseResults;
 };
+
+const obfuscateProperties = (obj, properties) => {
+	if (process.env.BTCEXP_SKIP_LOG_OBFUSCATION) {
+		return obj;
+	}
+	
+	let objCopy = Object.assign({}, obj);
+
+	properties.forEach(name => {
+		objCopy[name] = "*****";
+	});
+
+	return objCopy;
+}
 
 const perfLog = [];
 let perfLogItemCount = 0;
@@ -1353,6 +1630,7 @@ module.exports = {
 	formatLargeNumberSignificant: formatLargeNumberSignificant,
 	geoLocateIpAddresses: geoLocateIpAddresses,
 	getTxTotalInputOutputValues: getTxTotalInputOutputValues,
+	tryParseAddress: tryParseAddress,
 	rgbToHsl: rgbToHsl,
 	colorHexToRgb: colorHexToRgb,
 	colorHexToHsl: colorHexToHsl,
@@ -1360,7 +1638,7 @@ module.exports = {
 	buildQrCodeUrls: buildQrCodeUrls,
 	ellipsize: ellipsize,
 	ellipsizeMiddle: ellipsizeMiddle,
-	shortenTimeDiff: shortenTimeDiff,
+	summarizeDuration: summarizeDuration,
 	outputTypeAbbreviation: outputTypeAbbreviation,
 	outputTypeName: outputTypeName,
 	asHash: asHash,
@@ -1380,7 +1658,10 @@ module.exports = {
 	getVoutAddresses: getVoutAddresses,
 	xpubChangeVersionBytes: xpubChangeVersionBytes,
 	bip32Addresses: bip32Addresses,
+	difficultyAdjustmentEstimates: difficultyAdjustmentEstimates,
+	nextHalvingEstimates: nextHalvingEstimates,
 	sleep: sleep,
+	obfuscateProperties: obfuscateProperties,
 	awaitPromises: awaitPromises,
 	perfLogNewItem: perfLogNewItem,
 	perfLog: perfLog,
