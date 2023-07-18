@@ -1,3 +1,8 @@
+##### v3.4.0+SW
+###### 2023-07-18
+
+* No changes to v3.4.0
+
 ##### v3.4.0
 ###### 2023-06-14
 
@@ -32,7 +37,7 @@
 ##### v3.3.0+SW
 ###### 2023-03-09
 
-* Removed "node-details" and "peers" pages due to underired data leak
+* Removed "node-details" and "peers" pages due to undesired data leak
 
 
 ##### v3.3.0
