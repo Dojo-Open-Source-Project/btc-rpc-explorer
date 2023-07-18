@@ -8,6 +8,8 @@ const crypto = require('crypto');
 const url = require('url');
 const path = require('path');
 
+const apiDocs = require("../docs/api.js");
+
 let baseUrl = (process.env.BTCEXP_BASEURL || "/").trim();
 if (!baseUrl.startsWith("/")) {
 	baseUrl = "/" + baseUrl;
@@ -35,15 +37,6 @@ const currentCoin = process.env.BTCEXP_COIN || "BTC";
 
 const rpcCred = credentials.rpc;
 
-if (rpcCred.cookie && !rpcCred.username && !rpcCred.password && fs.existsSync(rpcCred.cookie)) {
-	console.log(`Loading RPC cookie file: ${rpcCred.cookie}`);
-
-	[ rpcCred.username, rpcCred.password ] = fs.readFileSync(rpcCred.cookie).toString().split(':', 2);
-
-	if (!rpcCred.password) {
-		throw new Error(`Cookie file ${rpcCred.cookie} in unexpected format`);
-	}
-}
 
 const cookieSecret = process.env.BTCEXP_COOKIE_SECRET
  || (rpcCred.password && crypto.createHmac('sha256', JSON.stringify(rpcCred))
@@ -95,8 +88,10 @@ const slowDeviceMode = (process.env.BTCEXP_SLOW_DEVICE_MODE.toLowerCase() == "tr
 module.exports = {
 	host: process.env.BTCEXP_HOST || "127.0.0.1",
 	port: process.env.PORT || process.env.BTCEXP_PORT || 3002,
+	secureSite: process.env.BTCEXP_SECURE_SITE == "true",
 
 	baseUrl: baseUrl,
+	apiBaseUrl: apiDocs.baseUrl,
 
 	coin: currentCoin,
 
@@ -124,14 +119,15 @@ module.exports = {
 	cdn: {
 		active: (cdnBaseUrl == "." ? false : true),
 		s3Bucket: process.env.BTCEXP_S3_BUCKET,
+		s3BucketRegion: process.env.BTCEXP_S3_BUCKET_REGION,
 		s3BucketPath: s3BucketPath,
 		baseUrl: cdnBaseUrl
 	},
 
 	rpcBlacklist:
-	  process.env.BTCEXP_RPC_ALLOWALL.toLowerCase() == "true"  ? []
-	: process.env.BTCEXP_RPC_BLACKLIST ? process.env.BTCEXP_RPC_BLACKLIST.split(',').filter(Boolean)
-	: [
+		process.env.BTCEXP_RPC_ALLOWALL.toLowerCase() == "true"  ? []
+		: process.env.BTCEXP_RPC_BLACKLIST ? process.env.BTCEXP_RPC_BLACKLIST.split(',').filter(Boolean)
+		: [
 		"addnode",
 		"backupwallet",
 		"bumpfee",
@@ -227,7 +223,7 @@ module.exports = {
 		toolSections: [
 			{name: "Basics", items: [0]},
 			{name: "Mempool", items: [2, 14, 3]},
-			{name: "Analysis", items: [7, 16, 8, 9, 10, 1]},
+			{name: "Analysis", items: [7, 16, 8, 9, 10, 1, 18]},
 			{name: "Technical", items: [13, 4, 5]},
 			{name: "Fun", items: [6, 15, 17, 11]},
 		]
@@ -248,8 +244,8 @@ module.exports = {
 	/* 6 */		{name:(coins[currentCoin].name + " Fun"), url:"./fun", desc:"Curated fun/interesting historical blockchain data.", iconClass:"bi-flag"},
 
 	/* 7 */		{name:"Mining Summary", url:"./mining-summary", desc:"Summary of recent data about miners.", iconClass:"bi-hammer"},
-	/* 8 */	{name:"Block Stats", url:"./block-stats", desc:"Summary data for blocks in configurable range.", iconClass:"bi-stack"},
-	/* 9 */	{name:"Block Analysis", url:"./block-analysis", desc:"Summary analysis for all transactions in a block.", iconClass:"bi-chevron-double-down"},
+	/* 8 */		{name:"Block Stats", url:"./block-stats", desc:"Summary data for blocks in configurable range.", iconClass:"bi-stack"},
+	/* 9 */		{name:"Block Analysis", url:"./block-analysis", desc:"Summary analysis for all transactions in a block.", iconClass:"bi-chevron-double-down"},
 	/* 10 */	{name:"Difficulty History", url:"./difficulty-history", desc:"Details of difficulty changes over time.", iconClass:"bi-clock-history"},
 
 	/* 11 */	{name:"Whitepaper Extractor", url:"./bitcoin-whitepaper", desc:"Extract the Bitcoin whitepaper from data embedded within the blockchain.", iconClass:"bi-file-earmark-text"},
@@ -264,6 +260,8 @@ module.exports = {
 	/* 16 */	{name:"UTXO Set", url:"./utxo-set", desc:"View the latest UTXO Set.", iconClass:"bi-list-columns"},
 
 	/* 17 */	{name:"Holidays", url:"./holidays", desc:"Curated list of Bitcoin 'Holidays'.", iconClass:"bi-calendar-heart"},
+
+	/* 18 */	{name:"Next Halving", url:"./next-halving", desc:"Estimated details about the next halving.", iconClass:"bi-square-half"},
 	]
 };
 
