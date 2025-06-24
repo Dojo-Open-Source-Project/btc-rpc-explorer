@@ -89,6 +89,22 @@ router.get("/blocks/tip", asyncHandler(async (req, res, next) => {
 	next();
 }));
 
+// undocumented, old url
+router.get("/blocks/tip/height", asyncHandler(async (req, res, next) => {
+	try {
+		const getblockchaininfo = await coreApi.getBlockchainInfo();
+
+		res.send(String(getblockchaininfo.blocks));
+
+	} catch (e) {
+		utils.logError("234508ehede", e);
+
+		res.json({success: false});
+	}
+
+	next();
+}));
+
 router.get("/block/:hashOrHeight", asyncHandler(async (req, res, next) => {
 	const hashOrHeight = req.params.hashOrHeight;
 	let hash = (hashOrHeight.length == 64 ? hashOrHeight : null);
@@ -322,8 +338,32 @@ router.get("/blockchain/next-halving", asyncHandler(async (req, res, next) => {
 
 /// ADDRESSES
 
+// encountered huge volume of traffic requesting the balance for top address
+// here, from many different ips, the below page leads me to believe the addresses
+// are associated with malware and the public instance API is being abused to 
+// aid the malware - block the requests
+// ref: https://pberba.github.io/crypto/2024/09/14/malicious-browser-extension-genesis-market/
+const blacklistedAddresses = [
+	"bc1q4fkjqusxsgqzylcagra800cxljal82k6y3ejay",
+	"bc1qvmvz53hdauzxuhs7dkm775tlqtd9vpk8ux7mqj",
+	"bc1qtms60m4fxhp5v229kfxwd3xruu48c4a0tqwafu",
+	"bc1qvkvzfla6wrem2uf4ejkuja8yp3c6f3xf72kyc9",
+	"bc1qnxwt7sr3rqatd6efjyym3nsgxhslyzeqndhjpn"
+];
+
 router.get("/address/:address", asyncHandler(async (req, res, next) => {
 	try {
+		const address = utils.asAddress(req.params.address);
+
+		if (blacklistedAddresses.includes(address)) {
+			debugLog(`Blocking request: ip=${req.ip}, req=${req.originalUrl}`)
+			res.status(418).json({
+				message: "Teapot",
+			});
+
+			return;
+		}
+
 		const { perfId, perfResults } = utils.perfLogNewItem({action:"api.address"});
 		res.locals.perfId = perfId;
 
@@ -346,8 +386,6 @@ router.get("/address/:address", asyncHandler(async (req, res, next) => {
 			sort = req.query.sort;
 		}
 
-
-		const address = utils.asAddress(req.params.address);
 
 		const transactions = [];
 		const addressApiSupport = addressApi.getCurrentAddressApiFeatureSupport();
@@ -465,6 +503,8 @@ router.get("/address/:address", asyncHandler(async (req, res, next) => {
 		next();
 
 	} catch (e) {
+		utils.logError("a39ehudsudese", e);
+
 		res.json({success:false});
 
 		next();
@@ -867,32 +907,37 @@ router.get("/mempool/summary", function(req, res, next) {
 	}).catch(next);
 });
 
-router.get("/mempool/fees", function(req, res, next) {
-	let feeConfTargets = [1, 3, 6, 144];
-	coreApi.getSmartFeeEstimates("CONSERVATIVE", feeConfTargets).then(function(rawSmartFeeEstimates){
-		let smartFeeEstimates = {};
+router.get("/mempool/fees", asyncHandler(async (req, res, next) => {
+	let feeConfTargets = [1, 3, 6, 144];	
+	let rawSmartFeeEstimates = await coreApi.getSmartFeeEstimates("CONSERVATIVE", feeConfTargets);
+	let smartFeeEstimates = {};
+	
+	for (let i = 0; i < feeConfTargets.length; i++) {
+		let rawSmartFeeEstimate = rawSmartFeeEstimates[i];
+		if (rawSmartFeeEstimate.errors) {
+			smartFeeEstimates[feeConfTargets[i]] = "?";
+		} else {
+			smartFeeEstimates[feeConfTargets[i]] = parseInt(new Decimal(rawSmartFeeEstimate.feerate).times(coinConfig.baseCurrencyUnit.multiplier).dividedBy(1000));
+		}
+	}		
 		
-		for (let i = 0; i < feeConfTargets.length; i++) {
-			let rawSmartFeeEstimate = rawSmartFeeEstimates[i];
-			if (rawSmartFeeEstimate.errors) {
-				smartFeeEstimates[feeConfTargets[i]] = "?";
+	let results = {
+		"nextBlock":{"smart":smartFeeEstimates[1]},
+		"30min":smartFeeEstimates[3],
+		"60min":smartFeeEstimates[6],
+		"1day":smartFeeEstimates[144]
+	};
 
-			} else {
-				smartFeeEstimates[feeConfTargets[i]] = parseInt(new Decimal(rawSmartFeeEstimate.feerate).times(coinConfig.baseCurrencyUnit.multiplier).dividedBy(1000));
-			}
-		}		
-		
-		let results = {
-			"nextBlock":smartFeeEstimates[1],
-			"30min":smartFeeEstimates[3],
-			"60min":smartFeeEstimates[6],
-			"1day":smartFeeEstimates[144]
-		};
+	let nextBlockEstimate = await coreApi.getNextBlockEstimate();
+	if (nextBlockEstimate != undefined && nextBlockEstimate.minFeeRate != undefined) {
+		//console.log("nextBlockEstimate: " + JSON.stringify(nextBlockEstimate));
+		results.nextBlock.min = parseInt(nextBlockEstimate.minFeeRate);
+		results.nextBlock.max = parseInt(nextBlockEstimate.maxFeeRate);
+		results.nextBlock.median = parseInt(nextBlockEstimate.medianFeeRate);
+	}
 
-		res.json(results);
-
-	}).catch(next);
-});
+	res.json(results);
+}));
 
 
 

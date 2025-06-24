@@ -752,7 +752,7 @@ router.get("/block-stats", asyncHandler(async (req, res, next) => {
 
 router.get("/mining-template", asyncHandler(async (req, res, next) => {
 	// url changed
-	res.redirect("./next-block");
+	res.redirect(301, "./next-block");
 }));
 
 router.get("/next-block", asyncHandler(async (req, res, next) => {
@@ -1006,7 +1006,7 @@ router.get("/block-height/:blockHeight", asyncHandler(async (req, res, next) => 
 		next();
 
 	} catch (err) {
-		res.locals.userMessageMarkdown = `Failed loading block: height=**${blockHeight}**`;
+		res.locals.userMessageMarkdown = `Failed loading block: height=**${req.params.blockHeight}**`;
 
 		res.locals.pageErrors.push(utils.logError("389wer07eghdd", err));
 

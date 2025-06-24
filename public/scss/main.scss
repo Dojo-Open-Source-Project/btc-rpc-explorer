@@ -96,13 +96,16 @@ $dropdown-min-width: 11rem;
 	border-top: 0px;
 }
 
+.hljs {
+	background: transparent;
+}
+
 
 .bg-content {
 	background-color: $body-bg !important;
 }
 
 code {
-	background-color: $body-bg !important;
 }
 
 .icon-shadow {
