@@ -63,6 +63,7 @@ debug.enable(process.env.DEBUG || debugDefaultCategories);
 
 
 global.cacheStats = {};
+global.appEventStats = {};
 
 
 
@@ -97,6 +98,8 @@ const markdown = require("markdown-it")();
 const v8 = require("v8");
 const compression = require("compression");
 const jayson = require('jayson/promise');
+const { rateLimit } = require("express-rate-limit");
+
 
 const appUtils = require("@janoside/app-utils");
 const s3Utils = appUtils.s3Utils;
@@ -116,6 +119,7 @@ debugLog(`Default cacheId '${global.cacheId}'`);
 global.btcNodeSemver = "0.0.0";
 
 
+const cleanupRouter = require('./routes/cleanupRouter.js');
 const baseActionsRouter = require('./routes/baseRouter.js');
 const internalApiActionsRouter = require('./routes/internalApiRouter.js');
 const apiActionsRouter = require('./routes/apiRouter.js');
@@ -235,6 +239,56 @@ expressApp.use(compression());
 expressApp.use(config.baseUrl, express.static(path.join(__dirname, 'public'), {
 	maxAge: 30 * 24 * 60 * 60 * 1000
 }));
+
+
+// https://www.npmjs.com/package/express-rate-limit
+const rateLimitWindowMinutes = config.rateLimiting.windowMinutes;
+const rateLimitWindowMaxRequests = config.rateLimiting.windowMaxRequests;
+
+if (rateLimitWindowMinutes == -1) {
+	debugLog("Disabling rate limiting");
+
+} else {
+	debugLog(`Enabling rate limiting: ${rateLimitWindowMaxRequests} requests per ${rateLimitWindowMinutes}min`);
+
+	const rateLimiter = rateLimit({
+		windowMs: rateLimitWindowMinutes * 60 * 1000, // 15 minutes
+		limit: rateLimitWindowMaxRequests, // Limit each IP to 100 requests per `window` (here, per 15 minutes).
+		standardHeaders: 'draft-7', // draft-6: `RateLimit-*` headers; draft-7: combined `RateLimit` header
+		legacyHeaders: false, // Disable the `X-RateLimit-*` headers.
+		skip: function (req, res) {
+			// tor traffic all comes in via tor proxy showing 127.0.0.1
+			// for now, until we identify it as a serious problem, let it pass
+			if (req.hostname.includes(".onion")) {
+				utils.trackAppEvent("torRequest");
+
+				return true;
+			}
+
+			if (req.originalUrl.includes("/snippet/")) {
+				return true;
+			}
+
+			if (req.originalUrl.includes("/api/")) {
+				return true;
+			}
+
+			return false;
+		},
+		handler: function (req, res, next) {
+			debugErrorLog(`Rate-limiting request: req=${JSON.stringify(utils.expressRequestToJson(req))}`);
+
+			utils.trackAppEvent("rateLimitedRequest");
+
+			res.status(429).json({
+				message: "Too many requests, please try again later.",
+			});
+		}
+	});
+
+	// Apply the rate limiting middleware to all requests.
+	expressApp.use(rateLimiter);
+}
 
 
 if (config.baseUrl != '/') {
@@ -540,17 +594,30 @@ async function onRpcConnectionVerified(getnetworkinfo, getblockchaininfo) {
 
 
 	if (false) {
-		var zmq = require("zeromq");
-		var sock = zmq.socket("sub");
-
-		sock.connect("tcp://192.168.1.1:28333");
-		console.log("Worker connected to port 28333");
-
-		sock.on("message", function(topic, message) {
-			console.log(Buffer.from(topic).toString("ascii") + " - " + Buffer.from(message).toString("hex"));
-		});
+		monitorNewTransactions().catch(err => console.error(err));
 
 		//sock.subscribe('rawtx');
+	}
+}
+
+async function monitorNewTransactions() {
+	const zmq = require("zeromq");
+	const sock = new zmq.Subscriber();
+
+	sock.connect("tcp://ubuntu:28333");
+	console.log("Worker connected to port 28333");
+
+	// Subscribe to all topics (use sock.subscribe("specific_topic") for specific topics)
+	sock.subscribe();
+
+	for await (const [topic, message] of sock) {
+		utils.trackAppEvent("newTransaction");
+
+		console.log(
+			topic.toString("ascii") +
+			" - " +
+			message.toString("hex")
+		);
 	}
 }
 
@@ -984,6 +1051,8 @@ expressApp.continueStartup = function() {
 };
 
 expressApp.use(function(req, res, next) {
+	utils.trackAppEvent("request");
+
 	req.startTime = Date.now();
 
 	next();
@@ -1101,6 +1170,7 @@ expressApp.use(csrfProtection, (req, res, next) => {
 	next();
 });
 
+expressApp.use(config.baseUrl, cleanupRouter);
 expressApp.use(config.baseUrl, baseActionsRouter);
 expressApp.use(config.baseUrl + 'internal-api/', internalApiActionsRouter);
 expressApp.use(config.baseUrl + 'api/', apiActionsRouter);
@@ -1132,6 +1202,8 @@ expressApp.use(function(req, res, next) {
 
 /// catch 404 and forwarding to error handler
 expressApp.use(function(req, res, next) {
+	utils.trackAppEvent("error404");
+
 	var err = new Error(`Not Found: ${req ? req.url : 'unknown url'}`);
 	err.status = 404;
 
@@ -1151,6 +1223,8 @@ const sharedErrorHandler = (req, err) => {
 
 		if (crawler) {
 			attributes.crawler = crawler;
+
+			utils.trackAppEvent("crawlRequest", 1, {"crawler": crawler});
 		}
 
 		debugErrorLog(`404 NotFound: path=${path}, ip=${ip}, userAgent=${userAgent} (crawler=${(crawler != null)}${crawler ? crawler : ""})`);

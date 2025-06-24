@@ -1,3 +1,13 @@
+##### v3.5.0
+###### 2025-06-23
+
+* Fix for node details page display on 28.0+
+* Tweak display of miner "notes" (disclaimer for Patoshi)
+* Fix for display of JSON-data content
+* New holidays and quotes
+* Updated miner IDs (including removal of 3 probably false positives from the "Patoshi" list)
+* Updated dependencies
+
 ##### v3.4.1+SW
 ###### 2025-05-09
 
@@ -11,7 +21,7 @@
 ##### v3.4.0
 ###### 2023-06-14
 
-* Breaking changes to the API (see [./api/changelog](/api/changlog))
+* Breaking changes to the API (see [./api/changelog](/api/changelog))
 * Homepage
 	* New "Next Halving" widget in Network Summary
 	* Show difficulty ATH comparison
