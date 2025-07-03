@@ -1,12 +1,12 @@
 {
 	"name": "btc-rpc-explorer",
-	"version": "3.5.0+SW",
+	"version": "3.5.1+SW",
 	"lockfileVersion": 3,
 	"requires": true,
 	"packages": {
 		"": {
 			"name": "btc-rpc-explorer",
-			"version": "3.5.0+SW",
+			"version": "3.5.1+SW",
 			"license": "MIT",
 			"dependencies": {
 				"@janoside/app-utils": "github:janoside/app-utils#ba4c23d3f",
